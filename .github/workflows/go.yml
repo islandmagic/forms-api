@@ -2,8 +2,8 @@ name: Update Forms Version
 
 on:
   schedule:
-    # Run on the 17th minute (arbitrary) every hour
-    - cron:  '17 * * * *'
+    # Run on the 01 minute (arbitrary) every hour
+    - cron:  '01 * * * *'
   push:
     branches:
       - main
@@ -40,7 +40,6 @@ jobs:
     - name: Update Forms Version
       run: |
         go run update-forms-ver.go > ghpages/v1/forms/standard-templates/latest
-        rm -f ghpages/v1/forms/standard-templates/Standard_Forms*.zip
         mv Standard_Forms*.zip ghpages/v1/forms/standard-templates
         cd ghpages/v1/forms/standard-templates
         [ -z "$(git status -s -- .)" ] && echo "No changes to be committed. Exiting." && exit 0

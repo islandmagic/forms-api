@@ -26,7 +26,7 @@ func (f FormsInfo) String() string {
 }
 
 const FormsInfoURL = "https://www.winlink.org/content/all_standard_templates_folders_one_zip_self_extracting_winlink_express_ver_12142016"
-const PatFormsAPIPath = "https://api.getpat.io/v1/forms/standard-templates/"
+const PatFormsAPIPath = "https://forms.radiomail.app/v1/forms/standard-templates/"
 
 var client = &http.Client{Timeout: 10 * time.Second}
 
