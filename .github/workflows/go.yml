@@ -2,12 +2,13 @@ name: Update Forms Version
 
 on:
   schedule:
-    # Run on the 01 minute (arbitrary) every hour
-    - cron:  '01 * * * *'
+    # Run on the 11 minute (arbitrary) every hour
+    - cron:  '11 * * * *'
   push:
     branches:
       - main
-
+  workflow_dispatch:
+  
 jobs:
 
   update-forms-version:
