@@ -25,7 +25,7 @@ func (f FormsInfo) String() string {
 	return fmt.Sprintf("version: '%s', url: '%s'", f.Version, f.ArchiveURL)
 }
 
-const FormsInfoURL = "https://www.winlink.org/content/all_standard_templates_folders_one_zip_self_extracting_winlink_express_ver_12142016"
+const FormsInfoURL = "https://www.winlink.org/content/how_manually_update_standard_templates"
 const PatFormsAPIPath = "https://forms.radiomail.app/v1/forms/standard-templates/"
 
 var client = &http.Client{Timeout: 10 * time.Second}
@@ -128,19 +128,16 @@ func getLatestFormsInfo() (*FormsInfo, error) {
 
 	// Scrape for the version and download link
 	versionRe := regexp.MustCompile(`Standard_Forms - Version (\d+\.\d+\.\d+(\.\d+)?)`)
-	downloadRe := regexp.MustCompile(`https://1drv.ms/u/([a-zA-Z0-9-_!]+)\?e=([a-zA-Z0-9-_]+)`)
+	downloadRe := regexp.MustCompile(`(https://drive\.google\.com/uc\?export=download&id=[a-zA-Z0-9_-]+)`)
 	versionMatches := versionRe.FindStringSubmatch(bodyString)
-	downloadMatches := downloadRe.FindStringSubmatch(bodyString)
-	if versionMatches == nil || len(versionMatches) < 2 || downloadMatches == nil || len(downloadMatches) < 3 {
+	downloadMatch := downloadRe.FindString(bodyString)
+	if versionMatches == nil || len(versionMatches) < 2 || len(downloadMatch) == 0 {
 		return nil, errors.New("can't scrape the version info page, HTML structure may have changed")
 	}
 	newestVersion := versionMatches[1]
-	docID := downloadMatches[1]
-	auth := downloadMatches[2]
-	downloadLink := "https://api.onedrive.com/v1.0/shares/" + docID + "/root/content?e=" + auth
 	return &FormsInfo{
 		Version:    newestVersion,
-		ArchiveURL: downloadLink,
+		ArchiveURL: downloadMatch,
 		Generated:  time.Now().UTC(),
 	}, nil
 }
