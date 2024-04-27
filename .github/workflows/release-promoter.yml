@@ -22,7 +22,7 @@ jobs:
     - name: Promote latest to stable
       run: |
         cd ghpages/v1/forms/standard-templates
-        cp latest.json stable.json
+        cp latest stable
         [ -z "$(git status -s -- .)" ] && echo "No changes to be committed. Exiting." && exit 0
         git add -- .
         git commit -m "Promoted latest to stable."
