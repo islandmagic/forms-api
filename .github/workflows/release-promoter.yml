@@ -1,0 +1,30 @@
+name: Publish
+on:
+  workflow_dispatch:
+
+jobs:
+  promote-latest-to-stable:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup git user/email
+      run: |
+        git config --global user.name github-actions
+        git config --global user.email github-actions@github.com
+
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        ref: ghpages
+        path: ghpages
+
+    - name: Promote latest to stable
+      run: |
+        cd ghpages/v1/forms/standard-templates
+        cp latest.json stable.json
+        [ -z "$(git status -s -- .)" ] && echo "No changes to be committed. Exiting." && exit 0
+        git add -- .
+        git commit -m "Promoted latest to stable."
+        git push origin ghpages
+        echo "Done."
