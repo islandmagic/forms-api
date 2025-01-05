@@ -2,8 +2,8 @@ name: Update Forms Version
 
 on:
   schedule:
-    # Run every hour
-    - cron:  '47 * * * *'
+    # Run every 4 times a day
+    - cron:  '47 0,6,12,18 * * *'
   push:
     branches:
       - main
