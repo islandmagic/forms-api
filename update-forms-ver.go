@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +17,23 @@ import (
 	"time"
 )
 
+// KeepAliveToken represents a unique token per calendar month.
+// This is used to ensure that the generated output changes at least monthly,
+// so scheduled workflows keep producing repo activity even when upstream data
+// doesn't change.
+type KeepAliveToken struct{}
+
+func (g KeepAliveToken) MarshalJSON() ([]byte, error) { return json.Marshal(g.String()) }
+
+func (KeepAliveToken) String() string {
+	return fmt.Sprintf("%x", sha1.Sum([]byte{byte(time.Now().Month())}))
+}
+
 type FormsInfo struct {
+	// We need this to keep scheduled actions from being disabled due to inactivity
+	// when the upstream Standard Forms version doesn't change for a while.
+	GhKeepAlive KeepAliveToken `json:"_gh_keepalive"`
+
 	Version    string    `json:"version"`
 	ArchiveURL string    `json:"archive_url"`
 	Generated  time.Time `json:"-"`
