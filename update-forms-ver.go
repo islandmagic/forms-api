@@ -44,19 +44,27 @@ func (f FormsInfo) String() string {
 }
 
 const FormsInfoURL = "https://www.winlink.org/content/how_manually_update_standard_templates"
-const PatFormsAPIPath = "https://forms.radiomail.app/v1/forms/standard-templates/"
+const DirectFormsZipURL = "https://downloads.winlink.org/User%20Programs/Standard_Forms.zip"
+const PatFormsAPIPath = "https://forms-api.islandmagic.co/v1/forms/standard-templates/"
 
 var client = &http.Client{Timeout: 30 * time.Second}
 
 func main() {
-	url, err := getLatestFormsUrl()
-	if err != nil {
-		log.Fatalf("could not get latest forms info: %v", err)
-	}
-	log.Printf("Found URL %s", url)
+	url := DirectFormsZipURL
 	latest, err := downloadZipURL(url)
 	if err != nil {
-		log.Fatalf("could not download archive url: %v", err)
+		log.Printf("direct download failed (%v); falling back to HTML scrape", err)
+		url, err = getLatestFormsUrl()
+		if err != nil {
+			log.Fatalf("could not get latest forms info: %v", err)
+		}
+		log.Printf("Found URL %s", url)
+		latest, err = downloadZipURL(url)
+		if err != nil {
+			log.Fatalf("could not download archive url: %v", err)
+		}
+	} else {
+		log.Printf("Downloaded from direct URL %s", url)
 	}
 	log.Printf("Found version %s", latest.Version)
 	_ = json.NewEncoder(os.Stdout).Encode(latest)
