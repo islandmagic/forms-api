@@ -4,17 +4,16 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/sha1"
+	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"html"
 	"io"
 	"log"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // KeepAliveToken represents a unique token per calendar month.
@@ -24,6 +23,8 @@ import (
 type KeepAliveToken struct{}
 
 func (g KeepAliveToken) MarshalJSON() ([]byte, error) { return json.Marshal(g.String()) }
+
+func (g *KeepAliveToken) UnmarshalJSON([]byte) error { return nil }
 
 func (KeepAliveToken) String() string {
 	return fmt.Sprintf("%x", sha1.Sum([]byte{byte(time.Now().Month())}))
@@ -43,35 +44,83 @@ func (f FormsInfo) String() string {
 	return fmt.Sprintf("version: '%s', url: '%s'", f.Version, f.ArchiveURL)
 }
 
-const FormsInfoURL = "https://www.winlink.org/content/how_manually_update_standard_templates"
 const DirectFormsZipURL = "https://downloads.winlink.org/User%20Programs/Standard_Forms.zip"
+const MirrorFormsAPIPath = "https://api.getpat.io/v1/forms/standard-templates/"
 const PatFormsAPIPath = "https://forms-api.islandmagic.co/v1/forms/standard-templates/"
 
-var client = &http.Client{Timeout: 30 * time.Second}
+const browserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+
+var (
+	// Cloudflare challenges non-browser HTTP/2 requests to downloads.winlink.org.
+	formsTransport = http.DefaultTransport.(*http.Transport).Clone()
+	formsClient    = &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: formsTransport,
+	}
+)
+
+func init() {
+	formsTransport.ForceAttemptHTTP2 = false
+	formsTransport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
+	formsTransport.TLSClientConfig = &tls.Config{NextProtos: []string{"http/1.1"}, MinVersion: tls.VersionTLS12}
+}
 
 func main() {
-	url := DirectFormsZipURL
-	latest, err := downloadZipURL(url)
+	latest, err := downloadZipURL(DirectFormsZipURL)
 	if err != nil {
-		log.Printf("direct download failed (%v); falling back to HTML scrape", err)
-		url, err = getLatestFormsUrl()
+		log.Printf("direct download failed (%v); falling back to api.getpat.io mirror", err)
+		mirrorURL, err := getMirrorArchiveURL()
 		if err != nil {
-			log.Fatalf("could not get latest forms info: %v", err)
+			log.Fatalf("could not get latest forms info from mirror: %v", err)
 		}
-		log.Printf("Found URL %s", url)
-		latest, err = downloadZipURL(url)
+		log.Printf("Found mirror URL %s", mirrorURL)
+		latest, err = downloadZipURL(mirrorURL)
 		if err != nil {
-			log.Fatalf("could not download archive url: %v", err)
+			log.Fatalf("could not download mirror archive url: %v", err)
 		}
+		log.Printf("Downloaded from mirror URL %s", mirrorURL)
 	} else {
-		log.Printf("Downloaded from direct URL %s", url)
+		log.Printf("Downloaded from direct URL %s", DirectFormsZipURL)
 	}
 	log.Printf("Found version %s", latest.Version)
 	_ = json.NewEncoder(os.Stdout).Encode(latest)
 }
 
-func downloadZipURL(url string) (*FormsInfo, error) {
-	resp, err := client.Get(url)
+func getMirrorArchiveURL() (string, error) {
+	req, err := http.NewRequest(http.MethodGet, MirrorFormsAPIPath+"latest", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", browserUserAgent)
+
+	resp, err := formsClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var info FormsInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return "", fmt.Errorf("decode mirror latest: %w", err)
+	}
+	if info.ArchiveURL == "" {
+		return "", fmt.Errorf("mirror latest response missing archive_url")
+	}
+	return info.ArchiveURL, nil
+}
+
+func downloadZipURL(zipURL string) (*FormsInfo, error) {
+	req, err := http.NewRequest(http.MethodGet, zipURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", browserUserAgent)
+
+	resp, err := formsClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +146,7 @@ func downloadZipURL(url string) (*FormsInfo, error) {
 	_, err = io.Copy(out, bytes.NewReader(b))
 	return &FormsInfo{
 		Version:    version,
-		ArchiveURL: fmt.Sprintf("%s%s", PatFormsAPIPath, filename),
+		ArchiveURL: PatFormsAPIPath + filename,
 		Generated:  time.Now(),
 	}, err
 }
@@ -123,7 +172,8 @@ func readAndCheckZip(rc io.ReadCloser) ([]byte, string, error) {
 			if err != nil {
 				return nil, "", err
 			}
-			version = strings.TrimSpace(string(ver))
+			// strings.TrimSpace is not sufficient. Version 1.1.6.0 was released as `1.1.6\t.0`
+			version = stripSpaces(string(ver))
 		}
 
 		// Otherwise, read the file to check for errors but discard the contents
@@ -133,6 +183,15 @@ func readAndCheckZip(rc io.ReadCloser) ([]byte, string, error) {
 	}
 
 	return body, version, nil
+}
+
+func stripSpaces(str string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, str)
 }
 
 func readZipFile(zf *zip.File) error {
@@ -152,36 +211,4 @@ func readZipFileContents(zf *zip.File) ([]byte, error) {
 	}
 	defer f.Close()
 	return io.ReadAll(f)
-}
-
-func getLatestFormsUrl() (string, error) {
-	req, err := http.NewRequest("GET", FormsInfoURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", "pat-forms-scraper")
-	req.Header.Set("Cache-Control", "no-cache")
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("can't read winlink forms version page: %w", err)
-	}
-	bodyString := string(bodyBytes)
-
-	// Scrape for the version and download link
-	hrefRe := regexp.MustCompile(`<a href="(https://.+)">\s*Standard_Forms - Latest Version\s*</a>`)
-	hrefMatches := hrefRe.FindStringSubmatch(bodyString)
-	if len(hrefMatches) < 2 {
-		return "", errors.New("can't scrape the version info page, HTML structure may have changed")
-	}
-	return html.UnescapeString(hrefMatches[1]), nil
 }
